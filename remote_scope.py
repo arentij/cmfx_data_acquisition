@@ -3,13 +3,14 @@ import numpy as np
 from tqdm import tqdm
 
 class Oscilloscope():
-    def __init__(self, channels, nPoints=None, memoryDepth='10M', auto_reset=False):
+    def __init__(self, channels={'INT01_DRIVER': '2', 'INT01': '3'}, nPoints=None, memoryDepth='10M', auto_reset=True):
         self.channels = channels
         self.nPoints = nPoints
         self.memoryDepth = memoryDepth
         self.data = {}
 
-        self.rm = pyvisa.ResourceManager()
+        self.rm = pyvisa.ResourceManager('@py')
+        print('Connecting to the scope')
         self.connectInstrument()
 
         if auto_reset:
@@ -19,8 +20,9 @@ class Oscilloscope():
 
     def connectInstrument(self):
         # USB connection, COM port is static
-        instrumentName = self.findIPAddress()
-        self.inst = self.rm.open_resource(instrumentName, timeout=1000, chunk_size=1024000, encoding='latin-1') # bigger timeout for long mem
+        # instrumentName = self.findIPAddress()
+        self.inst = self.rm.open_resource('TCPIP::169.254.146.112::INSTR', timeout=1000, chunk_size=1024000, encoding='latin-1') # bigger timeout for long mem
+        # self.inst = self.rm.open_resource('TCPIP::192.168.1.2::INSTR') # bigger timeout for long mem
 
     def findIPAddress(self):
         resources = self.rm.list_resources()
@@ -113,6 +115,7 @@ class Oscilloscope():
             self.readSuccess = True
 
         except Exception as e:
+            print('Exception')
             print(e)
             self.data[channel_name] = np.array([]) # return empty array
 
@@ -167,3 +170,12 @@ class Oscilloscope():
             self.tUnit = 's'
 
         return (self.time, self.tUnit)
+
+
+if __name__ == "__main__":
+    # This code will only be executed
+    # if the script is run as the main program
+
+
+    scope = Oscilloscope()
+    print('Hello World')

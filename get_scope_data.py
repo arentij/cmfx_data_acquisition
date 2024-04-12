@@ -1,15 +1,19 @@
+import time
+
 from remote_scope import *
 import pandas as pd
 import datetime
 import os
+import matplotlib.pyplot as plt
 
-scopeChannels = {'INT01_DRIVER': '2', 'INT01': '3'}
+scopeChannels = {'INT01': '1', 'INT01_DRIVER': '2', 'INT02': '3', 'INT02_DRIVER': '4'}
 runNumber = 1
 
 # All possible options for scope columns
 scope_columns = {'runNumber': {'name': 'Run Number', 'type': 'scalar'},
-                 'tUnit': {'name': 'Time Unit', 'type': 'scalar'},
-                 'time': {'name': 'Time', 'type': 'array'},
+                 'xinc': {'name': 'xinc', 'type': 'scalar'},
+                 'xorigin': {'name': 'xorigin', 'type': 'scalar'},
+                 'xref': {'name': 'xref', 'type': 'scalar'},
                  'INT01': {'name': 'INT01 (V)', 'type': 'array'},
                  'INT02': {'name': 'INT02 (V)', 'type': 'array'},
                  'INT01_DRIVER': {'name': 'INT01 Driver (V)', 'type': 'array'},
@@ -17,16 +21,26 @@ scope_columns = {'runNumber': {'name': 'Run Number', 'type': 'scalar'},
                  'ACC01': {'name': 'ACC01 (V)', 'type': 'array'},
                  'ACC02': {'name': 'ACC02 (V)', 'type': 'array'}}
 
-saveFolder = '/'
+saveFolder = '/CMFX/INT'
 
 # Connect to the scope
+print('Connecting to the scope')
 try:
     scope = Oscilloscope(scopeChannels)
+    # print('Found smth')
 except pyvisa.errors.VisaIOError:
     print('Could not connect to the scope')
 
+#  HERE WE NEED TO WAIT TILL ALL THE DATA IS IN SCOPES MEMORY
+
+time.sleep(1)
+
+# till here
+
 scope.read_scope()
 
+plt.plot(scope.INT02)
+plt.show()
 
 # Save scope results'
 scope_filename = f'CMFX_{runNumber}_scope.csv'
@@ -36,6 +50,7 @@ scope.set_runNumber(runNumber)
 now = datetime.datetime.now()
 runDate = now.date().strftime('%Y_%m_%d')
 # Create a folder for today's date if it doesn't already exist
+print('Making folder')
 if runDate not in os.listdir(saveFolder):
     os.mkdir(f'{saveFolder}/{runDate}')
 
