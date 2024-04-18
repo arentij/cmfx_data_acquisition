@@ -9,6 +9,9 @@ from remote_scope import *
 import pandas as pd
 import serial
 
+import numpy
+from seabreeze.spectrometers import Spectrometer, list_devices
+
 app = Flask(__name__, static_url_path='/static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
@@ -52,8 +55,10 @@ def record_cameras():
 
     scope_worker = threading.Thread(target=recording_scope, args=(int(N_exp),))
     scope_worker.start()
-
-
+    print('Recording scope worker started')
+    spectrometer_worker = threading.Thread(target=recording_spectrometer, args=(int(N_exp),))
+    spectrometer_worker.start()
+    print('Recording spectrometer worker started')
     #
     # camera_device  = "/dev/video0"
     # camera_device2 = "/dev/video2"
@@ -371,25 +376,26 @@ def crop_img(frame, mid_x, mid_y, size_x, size_y):
 
 
 def recording_scope(N_exp):
+    trigger.triggered = False
     scopeChannels = {'INT01': '1', 'INT01_DRIVER': '2', 'INT02': '3', 'INT02_DRIVER': '4'}
 
     # All possible options for scope columns
-    scope_columns = {'runNumber': {'name': 'Run Number', 'type': 'scalar'},
-                     'xinc': {'name': 'xinc', 'type': 'scalar'},
-                     'xorigin': {'name': 'xorigin', 'type': 'scalar'},
-                     'xref': {'name': 'xref', 'type': 'scalar'},
-                     'INT01': {'name': 'INT01 (V)', 'type': 'array'},
-                     'INT02': {'name': 'INT02 (V)', 'type': 'array'},
-                     'INT01_DRIVER': {'name': 'INT01 Driver (V)', 'type': 'array'},
-                     'INT02_DRIVER': {'name': 'INT02 Driver (V)', 'type': 'array'},
-                     'ACC01': {'name': 'ACC01 (V)', 'type': 'array'},
-                     'ACC02': {'name': 'ACC02 (V)', 'type': 'array'}}
-    # scope_columns = {'INT01': {'name': 'INT01 (V)', 'type': 'array'},
+    # scope_columns = {'runNumber': {'name': 'Run Number', 'type': 'scalar'},
+    #                  'xinc': {'name': 'xinc', 'type': 'scalar'},
+    #                  'xorigin': {'name': 'xorigin', 'type': 'scalar'},
+    #                  'xref': {'name': 'xref', 'type': 'scalar'},
+    #                  'INT01': {'name': 'INT01 (V)', 'type': 'array'},
     #                  'INT02': {'name': 'INT02 (V)', 'type': 'array'},
     #                  'INT01_DRIVER': {'name': 'INT01 Driver (V)', 'type': 'array'},
     #                  'INT02_DRIVER': {'name': 'INT02 Driver (V)', 'type': 'array'},
     #                  'ACC01': {'name': 'ACC01 (V)', 'type': 'array'},
     #                  'ACC02': {'name': 'ACC02 (V)', 'type': 'array'}}
+    scope_columns = {'INT01': {'name': 'INT01 (V)', 'type': 'array'},
+                     'INT02': {'name': 'INT02 (V)', 'type': 'array'},
+                     'INT01_DRIVER': {'name': 'INT01 Driver (V)', 'type': 'array'},
+                     'INT02_DRIVER': {'name': 'INT02 Driver (V)', 'type': 'array'},
+                     'ACC01': {'name': 'ACC01 (V)', 'type': 'array'},
+                     'ACC02': {'name': 'ACC02 (V)', 'type': 'array'}}
 
     saveFolder = '/CMFX/INT'
 
@@ -409,6 +415,7 @@ def recording_scope(N_exp):
             data = arduino.readline().decode().strip()
 
             if data == 'X':
+                trigger.triggered = True
                 print('Scope has been triggered')
                 print('Sleeping for a few seconds...')
                 time.sleep(15)
@@ -424,6 +431,7 @@ def recording_scope(N_exp):
 
     # Save scope results'
     scope_filename = f'CMFX_{N_exp:05d}_scope.parquet'
+    scope_filename_csv = f'CMFX_{N_exp:05d}_scope.csv'
     scope.set_runNumber(N_exp)
 
     # Date
@@ -442,7 +450,71 @@ def recording_scope(N_exp):
     results_df = pd.concat([pd.Series(val) for val in results], axis=1)
     results_df.columns = [scope_columns[variable]['name'] for variable in scope_columns if hasattr(scope, variable)]
     results_df.to_parquet(f'{saveFolder}/{runDate}/{scope_filename}', index=False)
+    # results_df.to_csv(f'{saveFolder}/{runDate}/{scope_filename_csv}', index=False)
     print('Done saving scope!')
+    return True
+
+
+def recording_spectrometer(N_exp):
+    saveFolder = '/CMFX/INT'
+    # print('Connecting to the spectrometer')
+    spectrometer_filename_csv = f'CMFX_{N_exp:05d}_spectrometer.csv'
+    spectrometer_log_filename_csv = f'CMFX_{N_exp:05d}_spectrometer_log.csv'
+    now = datetime.datetime.now()
+    runDate = now.date().strftime('%Y_%m_%d')
+    # Create a folder for today's date if it doesn't already exist
+    # print('Making folder')
+    if runDate not in os.listdir(saveFolder):
+        os.mkdir(f'{saveFolder}/{runDate}')
+    time.sleep(1)
+    print('Looking for the spectrometer')
+    devices = list_devices()
+    start_read = datetime.datetime.now()
+    print(devices)
+    spect = Spectrometer(devices[0])
+    print('Found the spectrometer')
+    integration_time = 4000 # ms
+    spect.integration_time_micros(integration_time)
+    print('integration time ')
+    print(integration_time)
+
+    start_making_array = datetime.datetime.now()
+    reading_times = []
+
+    print('Starting reading spectra')
+    while not trigger.triggered:
+        # print(trigger.triggered)
+        trigger.running = True
+        start_making_array = datetime.datetime.now()
+        waves = spect.wavelengths()
+        inten = spect.intensities()
+        # print(trigger.triggered)
+
+    print('The spectrometer received the trigger')
+    while True:
+        aq_time = datetime.datetime.now()
+        if (aq_time - start_making_array).total_seconds() > 0.5:
+            trigger.triggered = False
+            trigger.running   = False
+            break
+        reading_times.append((aq_time - start_making_array).total_seconds()*1000)
+        inten = numpy.vstack([inten, spect.intensities()])
+        # print('I Read another spectra')
+    # now let's write the files
+    print('writing spectra files')
+    df = pd.DataFrame(numpy.vstack([waves, inten]))
+    df.to_csv(f'{saveFolder}/{runDate}/{spectrometer_filename_csv}')
+    print('saved spectra to')
+    print(f'{saveFolder}/{runDate}/{spectrometer_filename_csv}')
+    with open(f'{saveFolder}/{runDate}/{spectrometer_log_filename_csv}', 'w') as log_file:
+        log_file.write(aq_time.strftime('%H:%M:%S.%f') + '\n')
+        for num in reading_times:
+            log_file.write(str(num) + '\n')
+
+
+    trigger.running = False
+    trigger.triggered= False
+    spect.close()
     return True
 
 # def sending_emails():
@@ -480,6 +552,13 @@ def recording_scope(N_exp):
 #     return True
 
 
+class Trigger():
+    def __init__(self):
+        self.initiated = datetime.datetime.now()
+        self.triggered = False
+        self.running = False
+
+
 if __name__ == "__main__":
     print('Started program')
     web_app_worker = threading.Thread(target=run_web_app, args=())
@@ -489,6 +568,10 @@ if __name__ == "__main__":
     camera_update_worker = threading.Thread(target=read_camera, args=())
     camera_update_worker.start()
 
-    # time.sleep(1)
+    trigger = Trigger()
+    while True:
+        time.sleep(0.001)
+
     # contents = urllib.request.urlopen("http://example.com/foo/bar").read()
+
 
